@@ -20,7 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 @dataclass
 class Config:
-    batch_size: int = 16
+    batch_size: int = 22
     num_workers: int = 4
     shuffle: bool = True
     num_epochs: int = 4
@@ -31,6 +31,7 @@ class Config:
     decay_steps: int = 10000
     decay_rate: float = 0.5
     warmup_steps: int = 1000
+    load_ckpt: str = '/tmp/slot-attention/run-009/last.pt'
 
 
 def google_learning_rate(
@@ -60,6 +61,7 @@ def main():
     path = get_new_dir('/tmp/slot-attention')
     device: th.device = th.device('cuda')
     model = SlotAttentionAE(cfg.img_size, cfg.num_slots).to(device)
+    # model = th.jit.script(model)
     transform = Compose([
         ToTensor(),
         Resize(cfg.img_size),
@@ -75,15 +77,16 @@ def main():
     data_loader = th.utils.data.DataLoader(dataset,
                                            batch_size=cfg.batch_size,
                                            num_workers=cfg.num_workers,
-                                           shuffle=cfg.shuffle)
+                                           shuffle=cfg.shuffle,
+                                           pin_memory=True)
     val_data_loader = th.utils.data.DataLoader(val_dataset,
                                                batch_size=cfg.batch_size,
                                                num_workers=cfg.num_workers,
                                                shuffle=False)
     optimizer = th.optim.Adam(model.parameters(),
                               lr=cfg.learning_rate)
-    load_ckpt('/tmp/slot-attention/run-009/last.pt', model, optimizer)
-    # NOTE(ycho): LambdaLR should return a 
+    load_ckpt(cfg.load_ckpt, model, optimizer)
+    # NOTE(ycho): LambdaLR should return a
     # _multiplicative factor_!!!
     scheduler = th.optim.lr_scheduler.LambdaLR(
         optimizer,
@@ -94,13 +97,17 @@ def main():
             decay_steps=cfg.decay_steps,
             # base_learning_rate=cfg.learning_rate
             base_learning_rate=1.0
-            ))
+        ))
     log_period: int = 64
     losses = []
 
+    # FIXME(ycho): avoid hard-coding `step`...
+    # somehow load from previous ckpt if possible
+    # this matter because of learning rate scheduling :P
     # step: int = 0
-    step:int = int(17.47e3)
+    step: int = int(17.47e3)
     writer = SummaryWriter(path)
+    th.backends.cudnn.benchmark=True
     try:
         for epoch in range(cfg.num_epochs):
             model.train()
@@ -111,7 +118,7 @@ def main():
                 pred_images, _, _, _ = model(images)
                 loss = criterion(images, pred_images)
 
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
                 losses.append(loss.detach().cpu().numpy())
@@ -127,6 +134,10 @@ def main():
                     for images in val_data_loader:
                         images = images.to(device)
                         pred_images, _, _, _ = model(images)
+                        val_loss = criterion(
+                            images, pred_images).detach().cpu().numpy()
+                        writer.add_scalar('val_loss', np.mean(val_loss),
+                                          step)
 
                         # NOTE(ycho): for now, we're not going to bother
                         # going through the whole dataset.

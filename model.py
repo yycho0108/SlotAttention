@@ -56,14 +56,16 @@ class SlotAttentionAE(nn.Module):
                  n_iter: int = 3):
         super().__init__()
         self.n_slots = n_slots
+        self.decoder_initial_size: Tuple[int, int] = (8, 8)
+
         self.slot_attention = SlotAttention(n_slots, dim_hidden, n_iter)
         self.encoder_cnn = SlotAttentionEncoder(dim_hidden)
         self.encoder_pos = PositionEmbedding(dim_hidden, resolution)
-        self.decoder_pos = PositionEmbedding(dim_hidden, (8, 8))
+        self.decoder_pos = PositionEmbedding(
+            dim_hidden, self.decoder_initial_size)
         # NOTE(ycho): output_dim = 4 = (3 (img) + 1 (mask))
         self.decoder_cnn = SlotAttentionDecoder(dim_hidden, 4, 1, 2,
                                                 4, 4, 1)
-        self.decoder_initial_size: Tuple[int, int] = (8, 8)
         self.layer_norm = nn.LayerNorm(dim_hidden)
         self.mlp = nn.Sequential(
             nn.Linear(dim_hidden, dim_hidden),
@@ -77,17 +79,30 @@ class SlotAttentionAE(nn.Module):
 
         x = self.encoder_cnn(x)  # B C H W
         x = self.encoder_pos(x)  # B C H W
-        x = einops.rearrange(x, '... d h w -> ... (h w) d')  # B (H W) D'
+        # x = einops.rearrange(x, '... d h w -> ... (h w) d')  # B (H W) D'
+        d, h, w = x.shape[-3:]
+        x = th.movedim(x, -3, -1).reshape(x.shape[:-3] +
+                                          (h * w, d))
         x = self.mlp(self.layer_norm(x))  # B (H W) D'
 
         slots = self.slot_attention(x)  # B (S) D
         batch_dims = slots.shape[:-2]
 
         # NOTE(ycho): sorry, what the hell is the point of repeat() here??
-        x = einops.repeat(slots, '... s d -> (... s) d h w',
-                          h=self.decoder_initial_size[0],
-                          w=self.decoder_initial_size[1])  # (BXS) D H W
-        # debug_memory()
+        # Option 1 : einops
+        # x = einops.repeat(slots, '... s d -> (... s) d h w',
+        #                   h=self.decoder_initial_size[0],
+        #                   w=self.decoder_initial_size[1])  # (BXS) D H W
+        # Option 2 : torch
+        x = slots.reshape(-1, x.shape[-1])[..., None, None]
+        # Option 2A : expand() with no copy
+        # x = x.expand(*(x.shape[:-2] + self.decoder_initial_size))
+        # Option 2B : generic repeat() without shape assumptions
+        # x = x.repeat(*(tuple( 1 for _ in x.shape[:-2] ) + self.decoder_initial_size))
+        # Option 2C : repeat() assuming BCHW shape assumption
+        x = x.repeat(
+            1, 1, self.decoder_initial_size[0],
+            self.decoder_initial_size[1])
         x = self.decoder_pos(x)
         x = self.decoder_cnn(x)
         x = x.reshape(batch_dims + (self.n_slots,) + x.shape[-3:])
@@ -99,22 +114,6 @@ class SlotAttentionAE(nn.Module):
         # if x.shape[-2:] != x0.shape[-2:]
         # x = F.interpolate(x, x0.shape[-2:])
         return (out, rec, msk, slots)
-
-
-# def debug_memory():
-#     import collections
-#     import gc
-#     import resource
-#     import torch
-#     print('maxrss = {}'.format(
-#         resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
-#     tensors = collections.Counter(
-#         (str(o.device), str(o.dtype), tuple(o.shape))
-#         for o in gc.get_objects()
-#         if torch.is_tensor(o)
-#     )
-#     for line in sorted(tensors.items()):
-#         print('{}\t{}'.format(*line))
 
 
 def main():
