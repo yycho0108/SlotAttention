@@ -12,10 +12,10 @@ from common import PositionEmbedding, Conv2D, ConvT2D
 
 
 class SlotAttentionEncoder(nn.Module):
-    def __init__(self, hidden_dim: int, kernel_size: int = 5,
+    def __init__(self, dim_out: int, kernel_size: int = 5,
                  padding: int = 2):
         super().__init__()
-        h = hidden_dim
+        h = dim_out
         k = kernel_size
         p = padding
         self.layer = nn.Sequential(
@@ -30,34 +30,18 @@ class SlotAttentionEncoder(nn.Module):
 
 
 class SlotAttentionDecoder(nn.Module):
-    def __init__(self, hidden_dim: int, kernel_size: int, padding: int,
+    def __init__(self, dim_hidden: int, kernel_size: int, padding: int,
                  stride: int, output_dim, out_kernel_size: int, out_padding: int):
         super().__init__()
         self.layer = nn.Sequential(
-            # upconv 4x
-            ConvT2D(hidden_dim, hidden_dim, stride, kernel_size, padding),
-            ConvT2D(hidden_dim, hidden_dim, stride, kernel_size, padding),
-            ConvT2D(hidden_dim, hidden_dim, stride, kernel_size, padding),
-            ConvT2D(hidden_dim, hidden_dim, stride, kernel_size, padding),
-
-            Conv2D(hidden_dim, hidden_dim, 5, 2),
-            # Conv2D(hidden_dim, hidden_dim, 3, 1),
-            nn.Conv2d(hidden_dim, output_dim, 3, 1, 1)
-            # ConvT2D(hidden_dim, hidden_dim, 1, kernel_size, padding),
-            # ConvT2D(hidden_dim, output_dim, 1, out_kernel_size, 1),
-            #nn.ConvTranspose2d(hidden_dim, hidden_dim,
-            #    kernel_size = 4,
-            #    stride = 2,
-            #    padding = 1), nn.ReLU(inplace = True), # 3
-            # nn.ConvTranspose2d(hidden_dim, hidden_dim, kernel_size = kernel_size, stride = stride,
-            #    padding = 0), nn.ReLU(inplace = True), # 2
-            #nn.ConvTranspose2d(hidden_dim, hidden_dim, kernel_size = kernel_size, stride = stride,
-            #    padding = 0), nn.ReLU(inplace = True), # 2
-            #nn.ConvTranspose2d(hidden_dim, hidden_dim, kernel_size = kernel_size, stride = stride,
-            #    padding = 0), nn.ReLU(inplace = True), # 3
-            #nn.ConvTranspose2d(hidden_dim, hidden_dim,
-            #    kernel_size = kernel_size, stride = 1, padding = 2), nn.ReLU(inplace = True), # 1
-            #nn.ConvTranspose2d(hidden_dim, output_dim, kernel_size = out_kernel_size, padding=1) # 1
+            # Upconv 4x
+            ConvT2D(dim_hidden, dim_hidden, stride, kernel_size, padding),
+            ConvT2D(dim_hidden, dim_hidden, stride, kernel_size, padding),
+            ConvT2D(dim_hidden, dim_hidden, stride, kernel_size, padding),
+            ConvT2D(dim_hidden, dim_hidden, stride, kernel_size, padding),
+            # Last two layers are sort of special, for some reason.
+            Conv2D(dim_hidden, dim_hidden, 5, 2),
+            nn.Conv2d(dim_hidden, output_dim, 3, 1, 1)
         )
 
     def forward(self, x: th.Tensor) -> th.Tensor:
@@ -93,25 +77,19 @@ class SlotAttentionAE(nn.Module):
 
         x = self.encoder_cnn(x)  # B C H W
         x = self.encoder_pos(x)  # B C H W
-        x = einops.rearrange(x, '... d h w -> ... (h w) d')
+        x = einops.rearrange(x, '... d h w -> ... (h w) d')  # B (H W) D'
         x = self.mlp(self.layer_norm(x))  # B (H W) D'
 
         slots = self.slot_attention(x)  # B (S) D
         batch_dims = slots.shape[:-2]
 
-        # x = slots
+        # NOTE(ycho): sorry, what the hell is the point of repeat() here??
         x = einops.repeat(slots, '... s d -> (... s) d h w',
                           h=self.decoder_initial_size[0],
                           w=self.decoder_initial_size[1])  # (BXS) D H W
-        # print('x', x.shape)
-        # NOTE(ycho): sorry, what the hell is the point of repeat() here??
         # debug_memory()
-        # print('x', x.shape)  # 8 64 8 8
         x = self.decoder_pos(x)
-        # print('x', x.shape)  # 8 64 8 8
-        # x = einops.rearrange(x, '... d h w -> ... (h w) d')
         x = self.decoder_cnn(x)
-        # print('x', x.shape)  # 8,64,128,128
         x = x.reshape(batch_dims + (self.n_slots,) + x.shape[-3:])
         rec = x[..., :-1, :, :]  # ... num_slots num_chans h w
         msk = x[..., -1, :, :]  # ... num_slots h w

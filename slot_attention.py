@@ -26,14 +26,15 @@ class SlotAttention(th.jit.ScriptModule):
         self.scale = dim_hidden ** (-0.5)
 
         self.slots_mu = nn.Parameter(
-            th.randn(1, 1, dim_feat))
+            nn.init.xavier_uniform_(th.empty(1, 1, dim_feat))
+        )  # NOTE(ycho): used to be randn
         self.slots_log_std = nn.Parameter(
-            th.zeros(1, 1, dim_feat))
-        nn.init.xavier_uniform_(self.slots_log_std)
+            nn.init.xavier_uniform_(th.empty(1, 1, dim_feat))
+        )  # NOTE(ycho): used to be zeros
 
-        self.to_q = nn.Linear(dim_feat, dim_feat)
-        self.to_k = nn.Linear(dim_feat, dim_feat)
-        self.to_v = nn.Linear(dim_feat, dim_feat)
+        self.to_q = nn.Linear(dim_feat, dim_feat, bias=False)
+        self.to_k = nn.Linear(dim_feat, dim_feat, bias=False)
+        self.to_v = nn.Linear(dim_feat, dim_feat, bias=False)
         self.gru = nn.GRUCell(dim_feat, dim_feat)  # ??
         dim_hidden: int = max(dim_feat, dim_hidden)
 

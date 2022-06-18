@@ -54,6 +54,5 @@ class PositionEmbedding(nn.Module):
         self.register_buffer('grid', grid)
 
     def forward(self, x: th.Tensor) -> th.Tensor:
-        # batch X channel X spatial
-        # shape = x.shape[
+        """assumes CHW layout for input/output."""
         return x + self.linear(self.grid).permute(2, 0, 1)
