@@ -52,6 +52,11 @@ def google_learning_rate(
 
 def main():
     cfg = Config()
+    #print(google_learning_rate(10000,
+    #    cfg.warmup_steps,
+    #    cfg.learning_rate,
+    #    cfg.decay_steps,
+    #    cfg.decay_rate))
     path = get_new_dir('/tmp/slot-attention')
     device: th.device = th.device('cuda')
     model = SlotAttentionAE(cfg.img_size, cfg.num_slots).to(device)
@@ -78,6 +83,8 @@ def main():
     # learining_rate = th.optim.lr_scheduler.
     optimizer = th.optim.Adam(model.parameters(),
                               lr=cfg.learning_rate)
+    # NOTE(ycho): LambdaLR should return a 
+    # _multiplicative factor_!!!
     scheduler = th.optim.lr_scheduler.LambdaLR(
         optimizer,
         partial(
@@ -85,7 +92,9 @@ def main():
             warmup_steps=cfg.warmup_steps,
             decay_rate=cfg.decay_rate,
             decay_steps=cfg.decay_steps,
-            base_learning_rate=cfg.learning_rate))
+            # base_learning_rate=cfg.learning_rate
+            base_learning_rate=1.0
+            ))
     log_period: int = 64
     losses = []
 
