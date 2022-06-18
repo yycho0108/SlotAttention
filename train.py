@@ -80,9 +80,9 @@ def main():
                                                batch_size=cfg.batch_size,
                                                num_workers=cfg.num_workers,
                                                shuffle=False)
-    # learining_rate = th.optim.lr_scheduler.
     optimizer = th.optim.Adam(model.parameters(),
                               lr=cfg.learning_rate)
+    load_ckpt('/tmp/slot-attention/run-009/last.pt', model, optimizer)
     # NOTE(ycho): LambdaLR should return a 
     # _multiplicative factor_!!!
     scheduler = th.optim.lr_scheduler.LambdaLR(
@@ -98,7 +98,8 @@ def main():
     log_period: int = 64
     losses = []
 
-    step: int = 0
+    # step: int = 0
+    step:int = int(17.47e3)
     writer = SummaryWriter(path)
     try:
         for epoch in range(cfg.num_epochs):
