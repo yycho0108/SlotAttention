@@ -5,14 +5,7 @@ from functools import partial
 import torch as th
 nn = th.nn
 F = nn.functional
-
-
-def _iterate(f: Callable[[th.Tensor], th.Tensor],
-             x: th.Tensor,
-             num_iters: int):
-    for _ in tuple(range(num_iters)):
-        x = f(x)
-    return x
+import einops
 
 
 # class SlotAttention(nn.Module):
@@ -46,16 +39,18 @@ class SlotAttention(th.jit.ScriptModule):
 
         self.mlp = nn.Sequential(
             nn.Linear(dim_feat, dim_hidden),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Linear(dim_hidden, dim_feat)
         )
 
+        # NOTE(ycho): why LayerNorm?
         self.norm_in = nn.LayerNorm(dim_feat)
         self.norm_slots = nn.LayerNorm(dim_feat)
         self.norm_pre_ff = nn.LayerNorm(dim_feat)  # ??
 
     @th.jit.script_method
-    def _step(self, slots: th.Tensor, k: th.Tensor, v: th.Tensor) -> th.Tensor:
+    def _step(self, slots: th.Tensor, k: th.Tensor, v: th.Tensor,
+              inplace: bool) -> th.Tensor:
         B, _, D = slots.shape
         prv_slots = slots
         slots = self.norm_slots(slots)
@@ -68,7 +63,11 @@ class SlotAttention(th.jit.ScriptModule):
         slots = self.gru(updates.reshape(-1, D),
                          prv_slots.reshape(-1, D)
                          ).reshape(B, -1, D)
-        slots += self.mlp(self.norm_pre_ff(slots))
+        delta = self.mlp(self.norm_pre_ff(slots))
+        if inplace:
+            slots += delta
+        else:
+            slots = slots + delta
         return slots
 
     @th.jit.script_method
@@ -85,29 +84,11 @@ class SlotAttention(th.jit.ScriptModule):
         k, v = self.to_k(x), self.to_v(x)
 
         # NOTE(ycho): version with implicit differentiation.
-        #slots = _iterate(partial(self._step, k=k, v=v),
-        #                 slots, self.n_iter)
         with th.no_grad():
             for _ in range(self.n_iter):
-                slots = self._step(slots, k, v)
-        slots = self._step(slots.detach(), k, v)
+                slots = self._step(slots, k, v, True)
+        slots = self._step(slots.detach(), k, v, False)
         return slots
-
-        # NOTE(ycho): default version
-        #for _ in range(self.n_iter):
-        #    prv_slots = slots
-        #    slots = self.norm_slots(slots)
-        #    q = self.to_q(slots)
-        #    dots = th.einsum('bid,bjd->bij', q, k) * self.scale
-        #    attn = th.softmax(dots, dim=1) + self.eps
-        #    attn = attn / attn.sum(dim=-1, keepdim=True)
-        #    # F.multi_head_attention_forward()?
-        #    updates = th.einsum('bjd,bij->bid', v, attn)
-        #    slots = self.gru(updates.reshape(-1, D),
-        #                     prv_slots.reshape(-1, D)
-        #                     ).reshape(B, -1, D)
-        #    slots += self.mlp(self.norm_pre_ff(slots))
-        #return slots
 
 
 def main():

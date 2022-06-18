@@ -55,17 +55,18 @@ class CLEVRDataset(tv.datasets.VisionDataset):
         image = self.image_loader(image_path)
         if self.transform is not None:
             image = self.transform(image)
+        return image
 
-        if Path(mask_path).exists():
-            mask = torch.as_tensor(np.load(mask_path))
-        else:
-            mask = None
+        #if Path(mask_path).exists():
+        #    mask = torch.as_tensor(np.load(mask_path))
+        #else:
+        #    mask = None
 
-        return dict(
-            image=image,
-            mask=mask,
-            # image_name=str(Path(image_path).name)
-        )
+        #return dict(
+        #    image=image,
+        #    mask=mask,
+        #    # image_name=str(Path(image_path).name)
+        #)
 
 
 def main():
