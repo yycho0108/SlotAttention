@@ -69,7 +69,7 @@ class CLEVRDataset(tv.datasets.VisionDataset):
 
 
 def main():
-    dataset = CLEVRDataset('/media/ssd/datasets/CLEVR/')
+    dataset = CLEVRDataset('/media/ssd/datasets/CLEVR/CLEVR_v1.0/')
 
 
 if __name__ == '__main__':
